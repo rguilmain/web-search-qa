@@ -1,0 +1,53 @@
+[project]
+name = "web-search-qa"
+version = "0.1.0"
+description = "Local web-search research agent with a Gradio UI"
+readme = "README.md"
+authors = [
+    { name = "Rich Guilmain", email = "richguilmain@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "ddgs>=9.16.1",
+    "gradio>=6.32.0",
+    "httpx>=0.28.1",
+    "openai>=3.57.0",
+    "pydantic-settings>=2.16.3",
+    "pypdf>=7.1.1",
+    "trafilatura>=2.3.1",
+]
+
+[project.scripts]
+web-search-qa = "web_search_qa.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "live: tests that call real external services (skipped unless RUN_LIVE_TESTS=1)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["web_search_qa"]
+
+[tool.ruff.format]
+quote-style = "double"
