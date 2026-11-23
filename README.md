@@ -59,6 +59,28 @@ requests return a clear error until the key is added and the app is restarted.
 - Previous questions and answers are kept as history (last 8 turns by default)
   but tool traces are not replayed as history.
 
+## Math formulas
+
+Formulas render through KaTeX in the chat. Supported delimiters:
+
+- Inline: `\(E=mc^2\)`
+- Display: `$$E=mc^2$$` or `\[E=mc^2\]`
+
+The system prompt tells the model to use LaTeX and to avoid backticks around
+formulas. If the model writes bare `$E=mc^2$`, the UI safely converts it to
+`\(E=mc^2\)` in the final answer only; prices like `$5 and $10` in tool output
+are left alone.
+
+For source material, `wikipedia_page` reads the raw article wikitext in the same
+API request and includes a “Formulas (LaTeX from article source)” section from
+`<math>…</math>` and `{{math|…}}`. `fetch_url` also converts common web math
+markup (`<script type="math/tex">`, `<math alttext="…">`, and MathML TeX
+annotations) into LaTeX delimiters before extraction.
+
+Limitations: Wikipedia pages that provide only MathML without TeX source, and
+scanned/image PDFs, may not yield recoverable LaTeX. You can still ask the
+model to restate such formulas in LaTeX from the surrounding context.
+
 ## How it works
 
 - `src/web_search_qa/agent.py` runs a bounded ReAct loop and yields typed

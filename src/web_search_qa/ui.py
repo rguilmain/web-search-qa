@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -23,6 +24,19 @@ from web_search_qa.tools import build_registry
 logger = logging.getLogger(__name__)
 
 _UI_OBSERVATION_CHARS = 6_000
+
+# Gradio/KaTeX delimiters. Bare $...$ is intentionally not a delimiter here:
+# tool observations contain prices and dollar signs, so only the final answer
+# has safe bare-dollar math normalized to \(...\) by _normalize_math().
+_LATEX_DELIMITERS: list[dict[str, str | bool]] = [
+    {"left": "$$", "right": "$$", "display": True},
+    {"left": "\\[", "right": "\\]", "display": True},
+    {"left": "\\(", "right": "\\)", "display": False},
+]
+
+# Match a single-dollar inline formula without touching $$...$$, escaped \$,
+# whitespace-padded pairs, or currency such as "$5 and $10".
+_INLINE_DOLLAR_MATH_RE = re.compile(r"(?<!\\)\$(?!\$)(?!\s)([^\n$]+?)(?<!\s)(?<!\\)\$(?!\$)")
 
 
 def create_ui(settings: Settings | None = None) -> gr.Blocks:
@@ -53,6 +67,7 @@ def create_ui(settings: Settings | None = None) -> gr.Blocks:
             layout="panel",
             group_consecutive_messages=False,
             autoscroll=True,
+            latex_delimiters=_LATEX_DELIMITERS,
             placeholder=(
                 "Ask a research question. The agent will show its thoughts, tool "
                 "calls, and observations here."
@@ -192,7 +207,7 @@ def create_ui(settings: Settings | None = None) -> gr.Blocks:
                                     status="done",
                                 )
                             )
-                        answer = event.text
+                        answer = _normalize_math(event.text)
                         chat.append(gr.ChatMessage(role="assistant", content=answer))
                         convo.extend(
                             [
@@ -250,6 +265,17 @@ def create_ui(settings: Settings | None = None) -> gr.Blocks:
         clear.click(clear_chat, inputs=None, outputs=outputs)
 
     return demo
+
+
+def _normalize_math(text: str) -> str:
+    """Convert safe bare ``$...$`` formulas to Gradio's ``\\(...\\)`` delimiters.
+
+    ``$$...$$``, ``\\[...\\]``, and ``\\(...\\)`` are already understood by the
+    Chatbot and are left untouched. Escaped dollars and currency-like pairs are
+    also left untouched so tool observations and prices do not render as math.
+    """
+
+    return _INLINE_DOLLAR_MATH_RE.sub(lambda match: f"\\({match.group(1)}\\)", text)
 
 
 def _trace_message(title: str, content: str, *, status: str = "done") -> gr.ChatMessage:

@@ -14,6 +14,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import trafilatura
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 from pypdf import PdfReader
 
 from web_search_qa.config import Settings
@@ -55,6 +56,8 @@ _TEXT_TYPES = {
     "text/xml",
 }
 _PDF_TYPE = "application/pdf"
+_MATH_TOKEN_PREFIX = "WEBSEARCHQAMATH"
+_MATH_TOKEN_SUFFIX = "ENDMATH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,8 +172,9 @@ class FetchTool:
     name = "fetch_url"
     description = (
         "Fetch an HTTP(S) page and extract its readable main content, title, and "
-        "outgoing links with context. Handles redirects, timeouts, size limits, "
-        "and PDFs. Private/local network addresses are blocked."
+        "outgoing links with context. Math markup is preserved as LaTeX. "
+        "Handles redirects, timeouts, size limits, and PDFs. Private/local "
+        "network addresses are blocked."
     )
     parameters = _FETCH_PARAMS
 
@@ -393,6 +397,71 @@ def _decode(body: bytes, encoding: str | None) -> str:
     return body.decode("utf-8", errors="replace")
 
 
+def _replace_math_with_token(soup: BeautifulSoup, element: Tag, token: str) -> None:
+    tag = soup.new_tag("span")
+    tag.string = token
+    element.replace_with(tag)
+
+
+def _convert_math_markup(soup: BeautifulSoup) -> dict[str, str]:
+    """Replace common web math markup with opaque tokens before extraction.
+
+    Tokens keep LaTeX out of trafilatura's Markdown escaping (for example
+    ``_`` becoming ``\\_``) and are restored after extraction.
+    """
+
+    mapping: dict[str, str] = {}
+
+    def add(tex: str, display: bool) -> str:
+        token = f"{_MATH_TOKEN_PREFIX}{len(mapping)}{_MATH_TOKEN_SUFFIX}"
+        mapping[token] = f"$$ {tex} $$" if display else f"\\({tex}\\)"
+        return token
+
+    for script in list(soup.find_all("script")):
+        script_type = " ".join(str(script.get("type") or "").lower().split(";"))
+        if "math/tex" not in script_type:
+            continue
+        tex = script.get_text().strip()
+        if not tex:
+            continue
+        classes = script.get("class") or []
+        if isinstance(classes, str):
+            classes = classes.split()
+        display = "mode=display" in script_type or any(
+            name in {"math-display", "display"} for name in classes
+        )
+        _replace_math_with_token(soup, script, add(tex, display))
+
+    for math in list(soup.find_all("math")):
+        tex = str(math.get("alttext") or "").strip()
+        if not tex:
+            annotation = math.find("annotation", attrs={"encoding": "application/x-tex"})
+            if annotation is not None:
+                tex = annotation.get_text().strip()
+        if not tex:
+            continue
+        classes = math.get("class") or []
+        if isinstance(classes, str):
+            classes = classes.split()
+        display = (
+            str(math.get("display") or "").lower()
+            in {
+                "block",
+                "true",
+            }
+            or "mwe-math-element-block" in classes
+        )
+        _replace_math_with_token(soup, math, add(tex, display))
+
+    return mapping
+
+
+def _restore_math(text: str, mapping: dict[str, str]) -> str:
+    for token, latex in mapping.items():
+        text = text.replace(token, latex)
+    return text
+
+
 def _extract_html(body: bytes, encoding: str | None, url: str, max_links: int) -> ExtractedPage:
     html = _decode(body, encoding)
     soup = BeautifulSoup(html, "html.parser")
@@ -404,6 +473,8 @@ def _extract_html(body: bytes, encoding: str | None, url: str, max_links: int) -
         if heading:
             title = normalize_whitespace(heading.get_text(" ", strip=True))
     links = _extract_outgoing_links(soup, url, max_links)
+    math_tokens = _convert_math_markup(soup)
+    html = str(soup)
 
     try:
         extracted = trafilatura.extract(
@@ -418,7 +489,11 @@ def _extract_html(body: bytes, encoding: str | None, url: str, max_links: int) -
     except Exception:
         extracted = None
     if extracted and len(normalize_whitespace(extracted)) >= 40:
-        return ExtractedPage(text=_clean_text(extracted), title=title, links=links)
+        return ExtractedPage(
+            text=_restore_math(_clean_text(extracted), math_tokens),
+            title=title,
+            links=links,
+        )
 
     for tag in soup.select(
         "script, style, noscript, template, svg, canvas, nav, header, footer, aside, "
@@ -432,7 +507,11 @@ def _extract_html(body: bytes, encoding: str | None, url: str, max_links: int) -
         for line in root.get_text("\n").splitlines()
         if normalize_whitespace(line)
     ]
-    return ExtractedPage(text=_clean_text("\n".join(lines)), title=title, links=links)
+    return ExtractedPage(
+        text=_restore_math(_clean_text("\n".join(lines)), math_tokens),
+        title=title,
+        links=links,
+    )
 
 
 def _extract_outgoing_links(

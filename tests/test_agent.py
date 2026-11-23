@@ -302,3 +302,10 @@ def test_empty_question_is_rejected(settings) -> None:
     agent = Agent(FakeLLM([]), ToolRegistry(), settings)
     with pytest.raises(ValueError, match="question"):
         list(agent.run("   "))
+
+
+def test_system_prompt_includes_math_rules(settings) -> None:
+    agent = Agent(FakeLLM([]), ToolRegistry(), settings)
+    assert r"\( ... \)" in agent.system_prompt
+    assert "$$ ... $$" in agent.system_prompt
+    assert "backticks" in agent.system_prompt

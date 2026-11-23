@@ -42,6 +42,8 @@ tests/            mocked HTTP + fake LLM tests; test_live.py is opt-in
   untouched. Keep `tools` in every request that may call tools.
 - Validate URLs for public http(s) only, including DNS results and redirects.
   Respect timeouts, size caps, and content-type checks.
+- Math output uses `\(...\)` inline and `$$...$$` display. Normalize bare
+  `$...$` only in final answers; never disable `sanitize_html`.
 - Secrets come only from `.env`/environment via `Settings`. `.env` is
   gitignored; edit `.env.example` when adding a setting.
 - Never enable `share=True`, `0.0.0.0`, auth, Docker, or deployment.

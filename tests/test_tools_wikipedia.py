@@ -80,6 +80,7 @@ def test_page_returns_text_links_and_context(settings) -> None:
         assert request.url.params["action"] == "parse"
         assert request.url.params["page"] == "Ada Lovelace"
         assert "text" in request.url.params["prop"]
+        assert "wikitext" in request.url.params["prop"]
         assert request.url.params["redirects"] == "1"
         assert request.url.params["formatversion"] == "2"
         return httpx.Response(
@@ -89,6 +90,7 @@ def test_page_returns_text_links_and_context(settings) -> None:
                     "title": "Ada Lovelace",
                     "pageid": 1,
                     "text": PAGE_HTML,
+                    "wikitext": r"Euler's identity is <math>e^{i\pi}+1=0</math>. Also {{math|a^2+b^2=c^2}}.",
                 }
             },
         )
@@ -104,6 +106,9 @@ def test_page_returns_text_links_and_context(settings) -> None:
     assert "External links and references" in result.content
     assert "https://example.com/ada-paper" in result.content
     assert "context:" in result.content
+    assert "Formulas (LaTeX from article source)" in result.content
+    assert r"\(e^{i\pi}+1=0\)" in result.content
+    assert r"\(a^2+b^2=c^2\)" in result.content
     assert "Category:Ada_Lovelace" not in result.content
     assert "Special:Search" not in result.content
 

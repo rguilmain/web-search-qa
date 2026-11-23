@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from html import unescape
 from typing import Any
 from urllib.parse import ParseResult, quote, unquote, urljoin, urlparse
 
@@ -39,6 +40,10 @@ _SEARCH_PARAMS = {
     },
     "required": ["query"],
 }
+
+_MATH_TAG_RE = re.compile(r"<math\b[^>]*>(.*?)</math\s*>", re.IGNORECASE | re.DOTALL)
+_MATH_TEMPLATE_RE = re.compile(r"\{\{\s*math\s*\|([^{}]+)\}\}", re.IGNORECASE)
+_MAX_FORMULAS = 20
 
 _PAGE_PARAMS = {
     "type": "object",
@@ -178,7 +183,8 @@ class WikipediaPageTool:
     name = "wikipedia_page"
     description = (
         "Read a Wikipedia article as clean text, with numbered internal links and "
-        "external/reference links plus context. Use offset to read long articles in "
+        "external/reference links plus context. Mathematical formulas from the "
+        "article source are included as LaTeX. Use offset to read long articles in "
         "chunks, and follow useful links with wikipedia_page or fetch_url."
     )
     parameters = _PAGE_PARAMS
@@ -193,7 +199,7 @@ class WikipediaPageTool:
             {
                 "action": "parse",
                 "page": title,
-                "prop": "text|displaytitle|revid",
+                "prop": "text|wikitext|displaytitle|revid",
                 "redirects": "1",
                 "disableeditsection": "1",
             }
@@ -210,16 +216,24 @@ class WikipediaPageTool:
         if not isinstance(html, str) or not html.strip():
             raise ToolError(f"Wikipedia returned no article content for {title!r}.")
 
+        wikitext = parsed.get("wikitext") or ""
+        if isinstance(wikitext, dict):
+            wikitext = wikitext.get("*") or ""
+        if not isinstance(wikitext, str):
+            wikitext = ""
+
         page_title = str(parsed.get("title") or title).strip()
         page_url = wikipedia_url(self.client.settings, page_title)
         soup = BeautifulSoup(html, "html.parser")
         internal: list[_Link] = []
         external: list[_Link] = []
+        formulas: list[str] = []
         if offset == 0:
             # Extract links before the fallback text path can mutate the soup.
             internal, external = _extract_links(
                 soup, page_url, self.client.settings.wikipedia_max_links
             )
+            formulas = _extract_latex_formulas(wikitext)
         text = _extract_article_text(page_url, soup)
         if not text:
             raise ToolError(
@@ -247,6 +261,14 @@ class WikipediaPageTool:
                     "Use fetch_url on these URLs to read the underlying sources."
                 )
                 parts.append(_format_links(external))
+            if formulas:
+                parts.append("## Formulas (LaTeX from article source)")
+                parts.append(
+                    "\n".join(
+                        f"{index}. \\({formula}\\)"
+                        for index, formula in enumerate(formulas, start=1)
+                    )
+                )
         else:
             parts.append(
                 "Links were included on the first page (offset=0); call with "
@@ -262,6 +284,34 @@ def wikipedia_url(settings: Settings, title: str) -> str:
 
 def _strip_html(value: str) -> str:
     return normalize_whitespace(BeautifulSoup(value, "html.parser").get_text(" ", strip=True))
+
+
+def _extract_latex_formulas(wikitext: str) -> list[str]:
+    """Pull LaTeX source out of raw MediaWiki wikitext."""
+
+    candidates: list[str] = []
+    for match in _MATH_TAG_RE.finditer(wikitext):
+        candidates.append(unescape(match.group(1)))
+    for match in _MATH_TEMPLATE_RE.finditer(wikitext):
+        parts = [part.strip() for part in match.group(1).split("|")]
+        if not parts:
+            continue
+        value = parts[-1]
+        value = re.sub(r"^\d+\s*=", "", value).strip()
+        if value:
+            candidates.append(unescape(value))
+
+    formulas: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        formula = normalize_whitespace(candidate).strip()
+        if not formula or formula in seen:
+            continue
+        seen.add(formula)
+        formulas.append(formula)
+        if len(formulas) >= _MAX_FORMULAS:
+            break
+    return formulas
 
 
 _ARTICLE_NOISE_SELECTOR = (

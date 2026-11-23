@@ -31,6 +31,23 @@ ARTICLE_HTML = """
 """
 
 
+MATH_HTML = r"""
+<html>
+  <head><title>Math Page</title></head>
+  <body>
+    <main>
+      <article>
+        <h1>Math Page</h1>
+        <p>This paragraph explains the inline formula <script type="math/tex">E=mc^2</script> and includes enough surrounding prose so the main-content extractor keeps this article.</p>
+        <p>A display formula follows: <script type="math/tex; mode=display">\int_0^1 x\,dx=\frac12</script>.</p>
+        <p>Another formula uses MathML alt text: <math alttext="a^2+b^2=c^2" display="inline"><mrow><mi>a</mi></mrow></math>.</p>
+      </article>
+    </main>
+  </body>
+</html>
+"""
+
+
 def make_fetch_tool(settings, handler) -> FetchTool:
     transport = httpx.MockTransport(handler)
     return FetchTool(
@@ -84,6 +101,21 @@ def test_fetch_extracts_main_text_and_links(settings) -> None:
     assert "## Outgoing links" in result.content
     assert "http://93.184.216.34/related" in result.content
     assert "related page" in result.content
+
+
+def test_fetch_preserves_math_as_latex(settings) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html"},
+            text=MATH_HTML,
+        )
+
+    result = make_fetch_tool(settings, handler)("http://93.184.216.34/math")
+    assert result.ok is True
+    assert r"\(E=mc^2\)" in result.content
+    assert r"$$ \int_0^1 x\,dx=\frac12 $$" in result.content
+    assert r"\(a^2+b^2=c^2\)" in result.content
 
 
 def test_fetch_follows_redirects_and_reports_final_url(settings) -> None:
