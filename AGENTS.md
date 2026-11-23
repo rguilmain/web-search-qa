@@ -44,6 +44,8 @@ tests/            mocked HTTP + fake LLM tests; test_live.py is opt-in
   Respect timeouts, size caps, and content-type checks.
 - Math output uses `\(...\)` inline and `$$...$$` display. Normalize bare
   `$...$` only in final answers; never disable `sanitize_html`.
+- Group a turn's thought/tool/observation events under one ChatMessage parent
+  using metadata `id` / `parent_id`; keep the final answer as a top-level message.
 - Secrets come only from `.env`/environment via `Settings`. `.env` is
   gitignored; edit `.env.example` when adding a setting.
 - Never enable `share=True`, `0.0.0.0`, auth, Docker, or deployment.

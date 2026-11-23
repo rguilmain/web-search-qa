@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -161,8 +163,15 @@ def create_ui(settings: Settings | None = None) -> gr.Blocks:
                 yield chat, convo, ""
                 return
 
+            trace_id = uuid.uuid4().hex
+            trace_parent = _new_trace_parent("🔬 Research trace", trace_id)
+            chat.append(trace_parent)
+            yield chat, convo, ""
+
             llm: OpenRouterLLM | None = None
             answer: str | None = None
+            trace_count = 0
+            started = time.monotonic()
             try:
                 llm = OpenRouterLLM(settings, model_name)
                 agent = Agent(llm, registry, settings)
@@ -173,38 +182,36 @@ def create_ui(settings: Settings | None = None) -> gr.Blocks:
                     max_steps=int(steps),
                 ):
                     if isinstance(event, ThoughtEvent):
-                        chat.append(_trace_message("💭 Thought", event.text, status="done"))
+                        trace_count += 1
+                        chat.append(_trace_child("💭 Thought", event.text, trace_id))
                     elif isinstance(event, ToolCallEvent):
+                        trace_count += 1
                         args = json.dumps(
                             event.arguments, indent=2, ensure_ascii=False, default=str
                         )
                         if event.parse_error:
                             args = f"{args}\n\n{event.parse_error}"
                         chat.append(
-                            _trace_message(
+                            _trace_child(
                                 f"🔧 Tool call: {event.name}",
                                 f"```json\n{args}\n```",
-                                status="done",
+                                trace_id,
                             )
                         )
                     elif isinstance(event, ObservationEvent):
+                        trace_count += 1
                         icon = "📄" if event.ok else "⚠️"
                         content = _clip_ui(event.content, _UI_OBSERVATION_CHARS)
-                        chat.append(
-                            _trace_message(
-                                f"{icon} {event.name} result",
-                                content,
-                                status="done",
-                            )
-                        )
+                        chat.append(_trace_child(f"{icon} {event.name} result", content, trace_id))
                     elif isinstance(event, FinalAnswerEvent):
                         if event.forced:
+                            trace_count += 1
                             chat.append(
-                                _trace_message(
+                                _trace_child(
                                     "⏱️ Step limit reached",
                                     "The model was asked to answer from the evidence "
                                     "already gathered.",
-                                    status="done",
+                                    trace_id,
                                 )
                             )
                         answer = _normalize_math(event.text)
@@ -225,17 +232,19 @@ def create_ui(settings: Settings | None = None) -> gr.Blocks:
                             "Try again or increase the step limit."
                         )
                     )
-                    yield chat, convo, ""
             except (LLMError, ConfigurationError) as exc:
                 chat.append(_error_message(str(exc)))
-                yield chat, convo, ""
             except Exception as exc:
                 logger.exception("Unexpected error while running the agent")
                 chat.append(_error_message(f"Unexpected error: {type(exc).__name__}: {exc}"))
-                yield chat, convo, ""
             finally:
                 if llm is not None:
                     llm.close()
+                label = "step" if trace_count == 1 else "steps"
+                trace_parent.metadata["title"] = f"🔬 Research trace · {trace_count} {label}"
+                trace_parent.metadata["status"] = "done"
+                trace_parent.metadata["duration"] = round(time.monotonic() - started, 2)
+            yield chat, convo, ""
 
         def clear_chat() -> tuple[list[Any], list[dict[str, str]], str]:
             return [], [], ""
@@ -278,11 +287,23 @@ def _normalize_math(text: str) -> str:
     return _INLINE_DOLLAR_MATH_RE.sub(lambda match: f"\\({match.group(1)}\\)", text)
 
 
-def _trace_message(title: str, content: str, *, status: str = "done") -> gr.ChatMessage:
+def _new_trace_parent(title: str, trace_id: str) -> gr.ChatMessage:
+    """Create the single collapsible box that holds a turn's full trace."""
+
+    return gr.ChatMessage(
+        role="assistant",
+        content="Expand to see thoughts, tool calls, and observations.",
+        metadata={"title": title, "id": trace_id, "status": "pending"},
+    )
+
+
+def _trace_child(title: str, content: str, trace_id: str) -> gr.ChatMessage:
+    """Create a nested trace event inside the turn's parent box."""
+
     return gr.ChatMessage(
         role="assistant",
         content=content.strip() or "(empty)",
-        metadata={"title": title, "status": status},
+        metadata={"title": title, "parent_id": trace_id, "status": "done"},
     )
 
 

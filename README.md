@@ -47,9 +47,10 @@ requests return a clear error until the key is added and the app is restarted.
 ## Using the UI
 
 - Type a research question and press Enter or **Research**.
-- The research trace is streamed as collapsible messages: thoughts, tool calls,
-  and observations. The final answer is a normal assistant message with
-  Markdown links to sources.
+- The full research trace — thoughts, tool calls, and observations — streams
+  into a single expandable box per turn and collapses when the answer is ready.
+  The final answer appears immediately below it as a normal assistant message
+  with Markdown links and rendered formulas.
 - **Stop** cancels the current run. **Clear** resets the chat and the model's
   conversation history.
 - In **Settings** you can choose any OpenRouter model ID (the dropdown is
